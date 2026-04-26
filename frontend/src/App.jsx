@@ -3,20 +3,22 @@ import { socket } from './socket';
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(socket.connected);
-  const [role, setRole] = useState(null); // 'creator', 'host', or 'player'
+  const [role, setRole] = useState(null); 
     
-  // --- BUILDER STATE ---
-  const [customQuestion, setCustomQuestion] = useState({
+  // --- BUILDER STATE (Now an Array!) ---
+  const [questions, setQuestions] = useState([{
     text: "What is the capital of France?",
     options: ["Berlin", "London", "Paris", "Madrid"],
-    correctAnswer: 2, // Index of 'Paris'
-    timeLimit: 10 // seconds
-  });
+    correctAnswer: 2,
+    timeLimit: 10
+  }]);
 
   // --- HOST STATE ---
   const [pin, setPin] = useState('');
   const [players, setPlayers] = useState([]);
   const [leaderboard, setLeaderboard] = useState(null);
+  const [hostState, setHostState] = useState('lobby'); // 'lobby', 'question_live', 'leaderboard'
+  const [currentQIndex, setCurrentQIndex] = useState(0);
   
   // --- PLAYER STATE ---
   const [name, setName] = useState('');
@@ -29,10 +31,14 @@ export default function App() {
     socket.on('connect', () => setIsConnected(true));
     socket.on('disconnect', () => setIsConnected(false));
     
-    socket.on('room_created', (newPin) => { setPin(newPin); setRole('host'); });
+    socket.on('room_created', (newPin) => { setPin(newPin); setRole('host'); setHostState('lobby'); });
     socket.on('player_joined', setPlayers);
-    socket.on('leaderboard_results', setLeaderboard);
+    socket.on('leaderboard_results', (results) => {
+        setLeaderboard(results);
+        setHostState('leaderboard');
+    });
     
+    // Player listens for new questions
     socket.on('quiz_started', (data) => {
       setActiveQuestion(data.question);
       setStartTime(data.startTime);
@@ -40,22 +46,21 @@ export default function App() {
     });
 
     return () => {
-      socket.off('connect');
-      socket.off('disconnect');
-      socket.off('room_created');
-      socket.off('player_joined');
-      socket.off('leaderboard_results');
-      socket.off('quiz_started');
+      socket.off('connect'); socket.off('disconnect'); socket.off('room_created');
+      socket.off('player_joined'); socket.off('leaderboard_results'); socket.off('quiz_started');
     };
   }, []);
 
   // --- ACTIONS ---
-  const startQuiz = () => {
-    socket.emit('start_quiz', { pin, customQuestion });
-    // Fetch leaderboard slightly after the custom time limit ends
+  const launchQuestion = (index) => {
+    setHostState('question_live');
+    const q = questions[index];
+    socket.emit('start_quiz', { pin, customQuestion: q });
+    
+    // Auto-fetch leaderboard after this specific question's timer ends
     setTimeout(() => {
       socket.emit('get_leaderboard', { pin });
-    }, (customQuestion.timeLimit * 1000) + 500); 
+    }, (q.timeLimit * 1000) + 500); 
   };
 
   const submitAnswer = (index) => {
@@ -64,10 +69,15 @@ export default function App() {
     setGameState('done');
   };
 
+  // --- HELPER FUNCTIONS FOR CREATOR ---
+  const addQuestion = () => {
+    setQuestions([...questions, { text: "New Question", options: ["A", "B", "C", "D"], correctAnswer: 0, timeLimit: 10 }]);
+  };
+
   // 1. MAIN MENU
   if (!role) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white font-sans p-4">
+      <div className="flex flex-col items-center justify-center min-h-screen bg-gray-900 text-white p-4">
         <div className={`fixed top-4 left-4 px-4 py-2 rounded-full font-bold shadow-lg border ${isConnected ? 'bg-green-500/20 text-green-400 border-green-500' : 'bg-red-500/20 text-red-400 border-red-500'}`}>
           {isConnected ? '🟢 Server Connected' : '🔴 Server Offline'}
         </div>
@@ -89,43 +99,40 @@ export default function App() {
   // 2. QUIZ CREATOR VIEW
   if (role === 'creator') {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-8">
-        <div className="max-w-2xl mx-auto bg-gray-800 p-8 rounded-2xl shadow-2xl border border-gray-700">
-          <h1 className="text-3xl font-black mb-8 text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">Quiz Builder</h1>
-          
-          <div className="space-y-6">
-            <div>
-              <label className="block text-gray-400 font-bold mb-2">The Question</label>
-              <input type="text" className="w-full p-4 bg-gray-900 rounded-lg border border-gray-600 text-xl font-bold" value={customQuestion.text} onChange={e => setCustomQuestion({...customQuestion, text: e.target.value})} />
-            </div>
+      <div className="min-h-screen bg-gray-900 text-white p-8 overflow-y-auto">
+        <div className="max-w-3xl mx-auto space-y-8">
+          <div className="flex justify-between items-center bg-gray-800 p-6 rounded-2xl border border-gray-700 shadow-2xl sticky top-0 z-10">
+              <h1 className="text-3xl font-black text-transparent bg-clip-text bg-gradient-to-r from-green-400 to-blue-500">Quiz Builder</h1>
+              <button onClick={() => socket.emit('create_room')} className="bg-purple-600 hover:bg-purple-500 font-black px-8 py-3 rounded-xl text-xl shadow-[0_0_20px_rgba(147,51,234,0.4)] transition-all">Launch Game 🚀</button>
+          </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              {customQuestion.options.map((opt, i) => (
-                <div key={i} className="flex flex-col">
-                  <label className="text-gray-400 text-sm font-bold mb-1 flex justify-between">
-                    Option {i + 1}
-                    <input type="radio" name="correctAnswer" checked={customQuestion.correctAnswer === i} onChange={() => setCustomQuestion({...customQuestion, correctAnswer: i})} className="w-4 h-4 cursor-pointer" />
-                  </label>
-                  <input type="text" className={`p-3 bg-gray-900 rounded-lg border ${customQuestion.correctAnswer === i ? 'border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.3)]' : 'border-gray-600'}`} value={opt} onChange={e => {
-                    const newOpts = [...customQuestion.options];
-                    newOpts[i] = e.target.value;
-                    setCustomQuestion({...customQuestion, options: newOpts});
-                  }} />
-                </div>
-              ))}
-            </div>
-
-            <div className="flex justify-between items-center pt-6 border-t border-gray-700">
-              <div className="flex items-center gap-4">
-                <label className="text-gray-400 font-bold">Time Limit (seconds):</label>
-                <input type="number" min="5" max="60" className="p-2 w-20 bg-gray-900 border border-gray-600 rounded text-center font-bold text-xl" value={customQuestion.timeLimit} onChange={e => setCustomQuestion({...customQuestion, timeLimit: parseInt(e.target.value)})} />
+          {questions.map((q, qIndex) => (
+            <div key={qIndex} className="bg-gray-800 p-8 rounded-2xl shadow-xl border border-gray-700">
+              <h2 className="text-xl font-bold text-gray-400 mb-4">Question {qIndex + 1}</h2>
+              <input type="text" className="w-full p-4 mb-6 bg-gray-900 rounded-lg border border-gray-600 text-xl font-bold focus:border-blue-500 outline-none" value={q.text} 
+                onChange={e => { const newQs = [...questions]; newQs[qIndex].text = e.target.value; setQuestions(newQs); }} />
+              
+              <div className="grid grid-cols-2 gap-4 mb-6">
+                {q.options.map((opt, oIndex) => (
+                  <div key={oIndex} className="flex flex-col">
+                    <label className="text-gray-400 text-sm font-bold mb-1 flex justify-between items-center">
+                      Option {oIndex + 1}
+                      <input type="radio" name={`correctAnswer-${qIndex}`} checked={q.correctAnswer === oIndex} onChange={() => { const newQs = [...questions]; newQs[qIndex].correctAnswer = oIndex; setQuestions(newQs); }} className="w-5 h-5 cursor-pointer accent-green-500" />
+                    </label>
+                    <input type="text" className={`p-3 bg-gray-900 rounded-lg border ${q.correctAnswer === oIndex ? 'border-green-500 shadow-[0_0_10px_rgba(34,197,94,0.2)]' : 'border-gray-600'} focus:outline-none`} value={opt} 
+                      onChange={e => { const newQs = [...questions]; newQs[qIndex].options[oIndex] = e.target.value; setQuestions(newQs); }} />
+                  </div>
+                ))}
               </div>
               
-              <button onClick={() => socket.emit('create_room')} className="bg-purple-600 hover:bg-purple-500 font-black px-8 py-4 rounded-xl text-xl transition-all shadow-lg">
-                Save & Generate PIN 🚀
-              </button>
+              <div className="flex items-center gap-4">
+                <label className="text-gray-400 font-bold">Timer (sec):</label>
+                <input type="number" className="p-2 w-20 bg-gray-900 border border-gray-600 rounded text-center font-bold text-xl" value={q.timeLimit} onChange={e => { const newQs = [...questions]; newQs[qIndex].timeLimit = parseInt(e.target.value); setQuestions(newQs); }} />
+              </div>
             </div>
-          </div>
+          ))}
+          
+          <button onClick={addQuestion} className="w-full bg-gray-800 hover:bg-gray-700 border-2 border-dashed border-gray-600 text-gray-400 font-bold py-6 rounded-2xl text-xl transition-all">+ Add Another Question</button>
         </div>
       </div>
     );
@@ -134,26 +141,53 @@ export default function App() {
   // 3. HOST PROJECTOR VIEW
   if (role === 'host') {
     return (
-      <div className="min-h-screen bg-gray-900 text-white p-8">
-        {!leaderboard ? (
-          <div className="max-w-4xl mx-auto text-center">
-            <h2 className="text-2xl text-gray-400 mb-2">Join at <span className="font-bold text-white">127.0.0.1:5173</span> with PIN:</h2>
-            <h1 className="text-8xl font-black tracking-widest mb-12 text-blue-400">{pin}</h1>
-            <button onClick={startQuiz} className="bg-green-500 hover:bg-green-400 text-black font-black text-2xl py-4 px-12 rounded-full mb-12 shadow-[0_0_30px_rgba(34,197,94,0.3)] hover:scale-105 transition-all">LAUNCH QUESTION</button>
-            <div className="flex flex-wrap justify-center gap-3">
-              {players.map((p, i) => <span key={i} className="bg-gray-800 px-6 py-3 rounded-lg text-xl font-bold animate-fade-in">{p}</span>)}
+      <div className="min-h-screen bg-gray-900 text-white p-8 flex flex-col items-center justify-center">
+        
+        {hostState === 'lobby' && (
+          <div className="max-w-4xl w-full text-center animate-fade-in">
+            <h2 className="text-3xl text-gray-400 mb-2">Join at <span className="font-bold text-white">127.0.0.1:5173</span> with PIN:</h2>
+            <h1 className="text-[120px] leading-none font-black tracking-widest mb-12 text-blue-400 drop-shadow-[0_0_40px_rgba(96,165,250,0.3)]">{pin}</h1>
+            <button onClick={() => launchQuestion(0)} className="bg-green-500 hover:bg-green-400 text-black font-black text-3xl py-6 px-16 rounded-full mb-12 shadow-[0_0_50px_rgba(34,197,94,0.4)] hover:scale-105 transition-all">START GAME</button>
+            <div className="flex flex-wrap justify-center gap-4">
+              {players.map((p, i) => <span key={i} className="bg-gray-800 px-6 py-3 rounded-lg text-2xl font-bold">{p}</span>)}
             </div>
           </div>
-        ) : (
-          <div className="max-w-2xl mx-auto">
-            <h1 className="text-5xl font-black text-center mb-8 text-yellow-400">LEADERBOARD</h1>
-            <div className="space-y-4">
+        )}
+
+        {hostState === 'question_live' && (
+           <div className="text-center animate-fade-in">
+             <h2 className="text-5xl font-black text-yellow-400 animate-pulse mb-4">Question {currentQIndex + 1} is Live!</h2>
+             <p className="text-2xl text-gray-400">Look at the player devices...</p>
+           </div>
+        )}
+
+        {hostState === 'leaderboard' && leaderboard && (
+          <div className="max-w-4xl w-full animate-fade-in">
+            <h1 className="text-6xl font-black text-center mb-12 text-yellow-400 drop-shadow-[0_0_20px_rgba(250,204,21,0.3)]">LEADERBOARD</h1>
+            <div className="space-y-4 mb-12">
               {leaderboard.map((player, i) => (
-                <div key={i} className="flex justify-between items-center bg-gray-800 p-6 rounded-xl text-2xl font-bold border border-gray-700">
-                  <span className="flex items-center gap-4"><span className="text-gray-500 text-xl">#{i + 1}</span> {player.name}</span>
-                  <span className="text-blue-400">{player.score} pts</span>
+                <div key={i} className="flex justify-between items-center bg-gray-800 p-6 rounded-2xl text-3xl font-bold border border-gray-700 shadow-lg">
+                  <span className="flex items-center gap-6"><span className="text-gray-500 w-12">#{i + 1}</span> {player.name}</span>
+                  <div className="flex items-center gap-8">
+                    <span className="text-gray-400 text-xl font-normal">⏱️ {player.time}</span>
+                    <span className="text-blue-400 w-32 text-right">{player.score} pts</span>
+                  </div>
                 </div>
               ))}
+            </div>
+            
+            <div className="text-center">
+              {currentQIndex < questions.length - 1 ? (
+                <button onClick={() => {
+                  const nextIndex = currentQIndex + 1;
+                  setCurrentQIndex(nextIndex);
+                  launchQuestion(nextIndex);
+                }} className="bg-blue-600 hover:bg-blue-500 text-white font-black text-2xl py-4 px-12 rounded-full shadow-[0_0_30px_rgba(37,99,235,0.4)] transition-all">
+                  Next Question ➡️
+                </button>
+              ) : (
+                <h2 className="text-4xl font-black text-green-400">🏆 Quiz Complete!</h2>
+              )}
             </div>
           </div>
         )}
@@ -171,7 +205,7 @@ export default function App() {
           <h2 className="text-2xl font-bold mb-8 text-center">{activeQuestion.text}</h2>
           <div className="grid grid-cols-1 gap-4">
             {activeQuestion.options.map((opt, i) => (
-              <button key={i} onClick={() => submitAnswer(i)} className="bg-blue-600 hover:bg-blue-500 active:scale-95 p-6 rounded-xl text-xl font-bold transition-all shadow-lg">
+              <button key={i} onClick={() => submitAnswer(i)} className="bg-blue-600 hover:bg-blue-500 active:bg-blue-700 p-6 rounded-xl text-xl font-bold transition-colors shadow-lg active:scale-95">
                 {opt}
               </button>
             ))}
@@ -179,7 +213,7 @@ export default function App() {
         </div>
       )}
 
-      {gameState === 'done' && <h2 className="text-3xl font-bold text-center text-green-400">Answer Submitted! Look at the main screen.</h2>}
+      {gameState === 'done' && <h2 className="text-3xl font-bold text-center text-green-400 animate-fade-in">Answer Submitted! Look at the main screen.</h2>}
     </div>
   );
 }

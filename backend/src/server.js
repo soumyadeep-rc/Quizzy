@@ -9,8 +9,6 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
-// Remove the hardcoded QUESTION!
-
 io.on('connection', (socket) => {
     console.log(`⚡ Player connected: ${socket.id}`);
 
@@ -18,8 +16,12 @@ io.on('connection', (socket) => {
     socket.on('create_room', async () => {
         const pin = Math.floor(100000 + Math.random() * 900000).toString();
         socket.join(pin);
+        
+        // Clean slate for the new room
         await redis.del(`room:${pin}:players`);
         await redis.del(`room:${pin}:leaderboard`);
+        await redis.del(`room:${pin}:times`); // NEW: Clear old time tracking
+        
         socket.emit('room_created', pin);
     });
 
@@ -31,14 +33,14 @@ io.on('connection', (socket) => {
         io.to(pin).emit('player_joined', players);
     });
 
-    // HOST: Start the Custom Quiz
+    // HOST: Start a specific Question
     socket.on('start_quiz', ({ pin, customQuestion }) => {
         const startTime = Date.now();
-        // Save the current correct answer in Redis securely so players can't inspect the network tab to cheat!
+        // Save answers securely in Redis
         redis.set(`room:${pin}:correctAnswer`, customQuestion.correctAnswer);
         redis.set(`room:${pin}:maxTime`, customQuestion.timeLimit * 1000);
 
-        // Strip the correct answer out before broadcasting to players
+        // Send a safe version to the players
         const safeQuestion = {
             text: customQuestion.text,
             options: customQuestion.options,
@@ -50,29 +52,42 @@ io.on('connection', (socket) => {
 
     // PLAYER: Submit Answer
     socket.on('submit_answer', async ({ pin, name, answerIndex, reactionTimeMs }) => {
-        // Fetch the correct answer and max time from Redis
         const correctAnswer = parseInt(await redis.get(`room:${pin}:correctAnswer`));
         const maxTimeMs = parseInt(await redis.get(`room:${pin}:maxTime`));
 
         const isCorrect = (answerIndex === correctAnswer);
         const basePoints = isCorrect ? 1000 : 0;
         
-        // COMPOSITE SCORING! 
         const timeFraction = Math.max(0, 1 - (reactionTimeMs / maxTimeMs));
         const compositeScore = basePoints + (isCorrect ? timeFraction : 0);
 
+        // 1. Add points to Leaderboard
         await redis.zincrby(`room:${pin}:leaderboard`, compositeScore, name);
+        
+        // 2. NEW: Track cumulative time in a Redis Hash
+        await redis.hincrby(`room:${pin}:times`, name, reactionTimeMs);
+
         io.to(pin).emit('player_answered', name);
     });
 
-    // HOST: Get Final Leaderboard
+    // HOST: Get Final Leaderboard with Time
     socket.on('get_leaderboard', async ({ pin }) => {
+        // Fetch top 10 players
         const results = await redis.zrevrange(`room:${pin}:leaderboard`, 0, 9, 'WITHSCORES');
         const leaderboard = [];
+        
+        // Results array looks like: ["Rahul", "1000", "Soumya", "0"]
         for (let i = 0; i < results.length; i += 2) {
+            const playerName = results[i];
+            const score = Math.floor(parseFloat(results[i+1]));
+            
+            // NEW: Fetch their total time from the Hash
+            const totalTimeMs = await redis.hget(`room:${pin}:times`, playerName) || 0;
+            
             leaderboard.push({
-                name: results[i],
-                score: Math.floor(parseFloat(results[i+1])) // Hide the tie-breaker decimals!
+                name: playerName,
+                score: score,
+                time: (parseInt(totalTimeMs) / 1000).toFixed(2) + 's' // Format to "2.45s"
             });
         }
         io.to(pin).emit('leaderboard_results', leaderboard);
