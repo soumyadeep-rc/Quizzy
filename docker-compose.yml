@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  # 1. The Redis Database Container
+  redis-cache:
+    image: redis:alpine
+    container_name: quiz_redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+
+  # 2. The Node.js Backend Container
+  backend:
+    build: 
+      context: ./backend
+    container_name: quiz_backend
+    ports:
+      - "3000:3000"
+    environment:
+      - REDIS_URL=redis://redis-cache:6379
+    depends_on:
+      - redis-cache
+    # This volume lets you edit code without rebuilding the container
+    volumes:
+      - ./backend:/app
+      - /app/node_modules 
+
+volumes:
+  redis_data:
