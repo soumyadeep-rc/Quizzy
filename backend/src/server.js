@@ -88,7 +88,7 @@ io.on('connection', (socket) => {
 
     socket.on('get_leaderboard', async ({ pin }) => {
     
-        const results = await redis.zrevrange(`room:${pin}:leaderboard`, 0, -1, 'WITHSCORES');
+        const results = await redis.zrevrange(`room:${pin}:leaderboard`, 0, 19, 'WITHSCORES');
         const leaderboard = [];
         
         for (let i = 0; i < results.length; i += 2) {
@@ -110,4 +110,5 @@ io.on('connection', (socket) => {
     });
 });
 
-server.listen(3000, '0.0.0.0', () => console.log(`🚀 Game Engine running on port 3000`));
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, '0.0.0.0', () => console.log(`🚀 Game Engine running on port ${PORT}`));
