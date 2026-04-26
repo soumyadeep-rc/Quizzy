@@ -14,4 +14,4 @@ COPY . .
 EXPOSE 3000
 
 # Start the server with nodemon for live-reloading
-CMD npx nodemon -L src/server.js
+CMD ["node", "src/server.js"]
