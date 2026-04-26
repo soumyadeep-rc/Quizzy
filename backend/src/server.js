@@ -20,19 +20,35 @@ io.on('connection', (socket) => {
         // Clean slate for the new room
         await redis.del(`room:${pin}:players`);
         await redis.del(`room:${pin}:leaderboard`);
-        await redis.del(`room:${pin}:times`); // NEW: Clear old time tracking
+        await redis.del(`room:${pin}:times`); 
+        
+        // NEW: Set an "active" flag in Redis so we know this room exists
+        await redis.set(`room:${pin}:active`, "true");
+        await redis.expire(`room:${pin}:active`, 86400); // Auto-delete room after 24 hours
         
         socket.emit('room_created', pin);
     });
 
     // PLAYER: Join a Room
     socket.on('join_room', async ({ pin, name }) => {
+        // NEW: Check if the room actually exists in Redis first!
+        const roomExists = await redis.get(`room:${pin}:active`);
+        
+        if (!roomExists) {
+            // Reject the player with an error
+            socket.emit('join_error', 'Invalid PIN. Room does not exist!');
+            return;
+        }
+
         socket.join(pin);
         await redis.sadd(`room:${pin}:players`, name);
+        await redis.zadd(`room:${pin}:leaderboard`, 0, name);
         const players = await redis.smembers(`room:${pin}:players`);
         io.to(pin).emit('player_joined', players);
+        
+        // Tell this specific player they are allowed in
+        socket.emit('join_success'); 
     });
-
     // HOST: Start a specific Question
     socket.on('start_quiz', ({ pin, customQuestion }) => {
         const startTime = Date.now();
@@ -58,7 +74,7 @@ io.on('connection', (socket) => {
         const isCorrect = (answerIndex === correctAnswer);
         const basePoints = isCorrect ? 1000 : 0;
         
-        const timeFraction = Math.max(0, 1 - (reactionTimeMs / maxTimeMs));
+        const timeFraction = Math.max(0, 0.0001 * (1 - (reactionTimeMs / maxTimeMs)));
         const compositeScore = basePoints + (isCorrect ? timeFraction : 0);
 
         // 1. Add points to Leaderboard
@@ -70,24 +86,24 @@ io.on('connection', (socket) => {
         io.to(pin).emit('player_answered', name);
     });
 
-    // HOST: Get Final Leaderboard with Time
     socket.on('get_leaderboard', async ({ pin }) => {
-        // Fetch top 10 players
-        const results = await redis.zrevrange(`room:${pin}:leaderboard`, 0, 9, 'WITHSCORES');
+    
+        const results = await redis.zrevrange(`room:${pin}:leaderboard`, 0, -1, 'WITHSCORES');
         const leaderboard = [];
         
-        // Results array looks like: ["Rahul", "1000", "Soumya", "0"]
         for (let i = 0; i < results.length; i += 2) {
             const playerName = results[i];
             const score = Math.floor(parseFloat(results[i+1]));
             
-            // NEW: Fetch their total time from the Hash
             const totalTimeMs = await redis.hget(`room:${pin}:times`, playerName) || 0;
+            
+            // NEW: If they didn't answer, show '--' instead of '0.00s'
+            const timeDisplay = totalTimeMs > 0 ? (parseInt(totalTimeMs) / 1000).toFixed(2) + 's' : '--';
             
             leaderboard.push({
                 name: playerName,
                 score: score,
-                time: (parseInt(totalTimeMs) / 1000).toFixed(2) + 's' // Format to "2.45s"
+                time: timeDisplay
             });
         }
         io.to(pin).emit('leaderboard_results', leaderboard);
