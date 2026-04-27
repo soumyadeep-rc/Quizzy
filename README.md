@@ -1,79 +1,69 @@
 # Quizzy - Real-time Live Quiz Platform
 
-A high-performance, containerized live quiz application built with React, Node.js, and Redis. This platform utilizes WebSockets for real-time player interaction and Redis Sorted Sets for high-concurrency leaderboard management, including sub-millisecond tie-breaking logic.
+A high-performance, distributed live quiz application built with React, Node.js, and Redis. This platform utilizes WebSockets for real-time player interaction and Redis Sorted Sets for high-concurrency leaderboard management, including sub-millisecond tie-breaking logic and dynamic viewport scaling.
 
 ## Architecture Overview
 
-The system is designed as a microservices-based monorepo, orchestrated via Docker Compose.
+The system has been migrated from a local Docker Compose setup to a highly scalable, distributed cloud architecture.
 
-1. **Frontend**: A React SPA built with Vite and styled with Tailwind CSS. It handles three distinct user flows: Creator (Quiz Building), Host (Projector View), and Player (Mobile Interface).
-2. **Backend**: An Express.js server integrated with Socket.io. It serves as the real-time coordinator, managing room states and broadcasting events.
-3. **Database**: Redis serves as the primary data store. It manages active room metadata, player sets, and ranked leaderboards using Sorted Sets (ZSET).
+1. **Frontend (Vercel)**: A React SPA built with Vite and styled with Tailwind CSS. It features a custom, responsive Cyberpunk/HUD interface and handles three distinct user flows: Creator, Host (Projector View), and Player (Mobile Interface).
+2. **Backend (Render)**: An Express.js server integrated with Socket.io. It serves as the real-time coordinator, managing room states, broadcasting events, and executing composite scoring calculations. 
+3. **Database (Upstash)**: A managed Serverless Redis instance serves as the primary data store, handling high-throughput concurrent write operations for active room metadata, player sets, and ranked leaderboards.
 
 ## Key Technical Features
 
 ### 1. Real-time Synchronization
-The application uses Socket.io to maintain full-duplex communication channels. This ensures that when a host launches a question, all connected players receive the payload simultaneously, and player join events are reflected instantly on the host lobby.
+The application uses Socket.io to maintain full-duplex TCP communication channels. This bypasses traditional HTTP polling, ensuring that when a host launches a question, all connected players receive the payload simultaneously with millisecond latency.
 
 ### 2. Composite Scoring Algorithm
-To handle high-concurrency environments where multiple players might answer correctly at nearly the same time, the system implements a composite scoring logic:
+To handle high-concurrency environments where multiple players submit answers in the same millisecond, the system implements a composite scoring logic:
 - Correct Answer: 1000 points.
 - Tie-Breaker: (1 - (Reaction Time / Max Question Time)).
 - Final Score: Base Points + Tie-Breaker.
-This results in a floating-point score (e.g., 1000.85) which Redis uses to rank players with sub-millisecond precision.
+This results in a floating-point score (e.g., 1000.85) which Redis uses to rank players with extreme precision.
 
 ### 3. State Management with Redis
-- **Sets (SADD)**: Used to track unique player nicknames within a specific room PIN.
-- **Sorted Sets (ZSET)**: Used for the leaderboard. Scores are stored as weights, allowing O(log(N)) updates and retrievals.
-- **Hashes (HSET)**: Used to track cumulative reaction times for players across multiple rounds.
+- **Sets (SADD)**: Tracks unique player nicknames within a specific room PIN to prevent duplicates.
+- **Sorted Sets (ZSET)**: Powers the leaderboard. Scores are stored as weights, allowing O(log(N)) updates and instantaneous retrieval of the top N players using ZREVRANGE.
+- **Hashes (HSET)**: Tracks cumulative reaction times for players across multiple rounds.
+
+### 4. Optimized Client Rendering
+The UI enforces strict Flexbox boundaries (100dvh) to eliminate scrollbars during active gameplay, ensuring all interactive elements remain above the fold on mobile devices. Leaderboards dynamically fetch and render limited slices to prevent network choking.
 
 ## Project Structure
 
 Quizzy/<br/>
 ├── backend/<br/>
 │   ├── src/<br/>
-│   │   ├── redisClient.js   # Redis connection configuration<br/>
-│   │   └── server.js        # Socket.io logic and scoring engine<br/>
-│   ├── Dockerfile           # Node.js alpine environment<br/>
-│   └── package.json<br/>
+│   │   ├── redisClient.js   # Cloud Redis connection logic<br/>
+│   │   └── server.js        # Socket.io logic, scoring engine, and HTTP ping route<br/>
+│   ├── Dockerfile           # Production Node.js alpine environment<br/>
+│   └── package.json         # Production start scripts (Vanilla Node)<br/>
 ├── frontend/<br/>
+│   ├── public/<br/>
+│   │   └── fonts/           # Custom typography (Mechsuit.otf)<br/>
 │   ├── src/<br/>
 │   │   ├── App.jsx          # Main application logic and UI views<br/>
+│   │   ├── index.css        # Global styles and custom clip-paths<br/>
 │   │   └── socket.js        # Socket.io client configuration<br/>
 │   ├── package.json<br/>
 │   └── vite.config.js<br/>
-├── docker-compose.yml       # Orchestration for Node and Redis services<br/>
-└── .gitignore               # Root-level ignore for node_modules and env<br/>
+└── .gitignore               # Root-level ignore<br/>
 
-## Setup and Installation
+## Environment Variables
 
-### Prerequisites
+To run this application in a production environment, the following variables must be configured:
 
-- Docker Desktop with WSL 2 integration enabled.
-- Node.js (for local frontend development).
+### Backend (Render)
+- `REDIS_URL`: The connection string provided by Upstash (e.g., rediss://default:password@endpoint.upstash.io:port)
+- `PORT`: Automatically injected by the cloud provider.
 
-### Deployment Steps
-
-- Initialize the Environment: Navigate to the root directory and ensure Docker is running.
-- Build and Start Containers: ```docker compose up --build```<br/>
-This command pulls the Redis Alpine image, builds the backend Node image, and establishes the internal Docker network.
-
-- Start the Frontend:<br/>
-```cd frontend```<br/>
-```npm install```<br/>
-```npm run dev```<br/>
-
-- Access the Application: <br/>
-Host/Creator: ```http://localhost:5173```<br/>
-
-## Development Notes
-### WSL 2 Networking
-- The application is configured to use the IPv4 loopback address (127.0.0.1) to ensure seamless communication between the Windows browser and the WSL 2 Docker daemon.
-
-### File Watching
-- The backend uses Nodemon with the legacy watch flag ```-L``` to ensure file changes made in the Windows environment are correctly detected within the Linux container.
+### Frontend (Vercel)
+- `VITE_BACKEND_URL`: The live URL of the deployed backend server (e.g., https://your-backend.onrender.com)
 
 ## Future Roadmap
-1. Implementation of persistent PostgreSQL storage for historical quiz data.<br/>
-2. Enhanced security via JWT-based host authentication.<br/>
-3. Support for media-rich question types (images/video).<br/>
+
+1. Transition from Redis Adapter to Apache Kafka for scaling beyond 1 million concurrent users.
+2. Implementation of persistent PostgreSQL storage for historical quiz data analytics.
+3. Enhanced security via JWT-based host authentication.
+4. Support for media-rich question types (images/video).
