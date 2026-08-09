@@ -35,23 +35,30 @@ io.on('connection', (socket) => {
     });
 
     // PLAYER: Join a Room
+    // PLAYER: Join a Room
     socket.on('join_room', async ({ pin, name }) => {
-        // NEW: Check if the room actually exists in Redis first!
+        // 1. Check if the room actually exists
         const roomExists = await redis.get(`room:${pin}:active`);
-        
         if (!roomExists) {
-            // Reject the player with an error
             socket.emit('join_error', 'Invalid PIN. Room does not exist!');
             return;
         }
 
+        // 2. THE FIX: Try to add the name and check Redis's response
+        const isAdded = await redis.sadd(`room:${pin}:players`, name);
+        
+        if (isAdded === 0) {
+            // Redis blocked it! The name is a duplicate.
+            socket.emit('join_error', 'Nickname is already taken! Please choose another.');
+            return; // Stop the code here so they don't join the socket room
+        }
+
+        // 3. If we get here, the name was unique! Proceed normally.
         socket.join(pin);
-        await redis.sadd(`room:${pin}:players`, name);
         await redis.zadd(`room:${pin}:leaderboard`, 0, name);
+        
         const players = await redis.smembers(`room:${pin}:players`);
         io.to(pin).emit('player_joined', players);
-        
-        // Tell this specific player they are allowed in
         socket.emit('join_success'); 
     });
     // HOST: Start a specific Question
