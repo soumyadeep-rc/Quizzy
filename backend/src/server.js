@@ -6,6 +6,11 @@ const redis = require('./redisClient');
 
 const app = express();
 app.use(cors());
+
+app.get('/ping', (req, res) => {
+    res.status(200).send('Server is awake!');
+});
+
 const server = http.createServer(app);
 const io = new Server(server, { cors: { origin: '*' } });
 
