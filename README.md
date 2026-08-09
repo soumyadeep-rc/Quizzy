@@ -17,6 +17,7 @@ Quizzy is a real-time, event-driven quiz platform built to eliminate the latency
 - [Environment Variables](#environment-variables)
 - [Getting Started](#getting-started)
 - [Current Bottlenecks & Future Roadmap](#current-bottlenecks--future-roadmap)
+- [License](#license)
 
 ---
 
@@ -234,7 +235,7 @@ Make sure `REDIS_URL` (backend) and `VITE_BACKEND_URL` (frontend) are set in you
 
 ## License
 
-Distributed under the [MIT_LICENSE](https://).
+Distributed under the [MIT_LICENSE](https://github.com/soumyadeep-rc/Quizzy/blob/main/LICENSE).
 
 ---
 
