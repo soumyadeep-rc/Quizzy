@@ -36,7 +36,16 @@ async function startServer() {
 
             // HOST: Create a Room
             socket.on('create_room', async () => {
-                const pin = Math.floor(100000 + Math.random() * 900000).toString();
+                let pin;
+                let roomExists = true;
+                
+                // Keep generating until we find a PIN that isn't active
+                while (roomExists) {
+                    pin = Math.floor(100000 + Math.random() * 900000).toString();
+                    const exists = await redis.exists(`room:${pin}:active`);
+                    roomExists = exists === 1;
+                }
+                
                 socket.join(pin);
                 
                 await redis.del(`room:${pin}:players`);
