@@ -85,6 +85,22 @@ export default function App() {
     setGameState('done');
   };
   const addQuestion = () => setQuestions([...questions, { text: "New Question", options: ["A", "B", "C", "D"], correctAnswer: 0, timeLimit: 10 }]);
+  const handleFileUpload = (event) => {
+  const file = event.target.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const uploadedQuestions = JSON.parse(e.target.result);
+      setQuestions(uploadedQuestions);
+      alert(`Success! Loaded ${uploadedQuestions.length} questions.`);
+    } catch (error) {
+      alert("Invalid JSON format. Please check your file.");
+    }
+  };
+  reader.readAsText(file);
+  };
   const handleExit = () => window.location.reload();
 
   // FIX: Un-cramped Leaderboard, added Time, spaced out Name/Score
@@ -181,6 +197,13 @@ export default function App() {
             </div>
           ))}
           <button onClick={addQuestion} className="mech-btn w-full bg-transparent border-2 border-dashed border-gray-700 text-gray-500 py-4 font-bold tracking-[0.2em] text-sm">+ ADD QUESTION</button>
+          <label className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-4 rounded-xl border border-slate-700 transition-all shadow-lg flex justify-center items-center gap-3 cursor-pointer">
+  <svg className="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+  </svg>
+  Upload quiz.json
+  <input type="file" accept=".json" className="hidden" onChange={handleFileUpload} />
+</label>
         </div>
       </div>
     );
